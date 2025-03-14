@@ -5,49 +5,65 @@ pipeline {
       args '--privileged -u root -v /var/run/docker.sock:/var/run/docker.sock'
     }
   }
+
+  environment {
+    DOCKER_IMAGE = "sagarmagar0709/ultimate-cicd:${BUILD_NUMBER}"
+    GIT_REPO_NAME = "Jenkins-Zero-To-Hero"
+    GIT_USER_NAME = "iam-veeramalla"
+  }
+
   stages {
     stage('Checkout') {
       steps {
-        sh 'echo passed'
+        sh 'echo Checkout stage passed'
       }
     }
+
+    stage('Install Dependencies') {
+      steps {
+        sh '''
+        apt update && apt install -y curl
+        curl -L https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq
+        chmod +x /usr/local/bin/yq
+        yq --version
+        '''
+      }
+    }
+
     stage('Build and Test') {
       steps {
-        sh 'ls -ltr'
-        sh 'cd java-maven-sonar-argocd-helm-k8s/spring-boot-app && mvn clean package'
+        sh '''
+        ls -ltr
+        cd java-maven-sonar-argocd-helm-k8s/spring-boot-app && mvn clean package
+        '''
       }
     }
+
     stage('Build and Push Docker Image') {
-      environment {
-        DOCKER_IMAGE = "sagarmagar0709/ultimate-cicd:${BUILD_NUMBER}"  // ✅ Fixed
-      }
       steps {
         withCredentials([usernamePassword(credentialsId: 'docker-cred', usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
           script {
-              sh '''
-              cd java-maven-sonar-argocd-helm-k8s/spring-boot-app 
-              docker build -t ${DOCKER_IMAGE} .
-              docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD
-              docker push ${DOCKER_IMAGE}
-              '''
+            sh '''
+            cd java-maven-sonar-argocd-helm-k8s/spring-boot-app 
+            docker build -t ${DOCKER_IMAGE} .
+            docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD
+            docker push ${DOCKER_IMAGE}
+            '''
           }
         }
       }
     }
+
     stage('Update Deployment File') {
-      environment {
-        GIT_REPO_NAME = "Jenkins-Zero-To-Hero"
-        GIT_USER_NAME = "iam-veeramalla"
-      }
       steps {
         withCredentials([string(credentialsId: 'github', variable: 'GITHUB_TOKEN')]) {
           sh '''
-            git config --global user.email "sagarmagar0709@gmail.com"
-            git config --global user.name "sagarmagar0709"
-            yq eval '.spec.template.spec.containers[0].image = "abhishekf5/ultimate-cicd:${BUILD_NUMBER}"' -i java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml
-            git add java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml
-            git commit -m "Update deployment image to version ${BUILD_NUMBER}"
-            git push https://${GITHUB_TOKEN}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME} HEAD:main
+          git config --global user.email "sagarmagar0709@gmail.com"
+          git config --global user.name "sagarmagar0709"
+          yq eval '.spec.template.spec.containers[0].image = "${DOCKER_IMAGE}"' -i java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml
+          git add java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml
+          git commit -m "Update deployment image to version ${BUILD_NUMBER}"
+          git push https://${GITHUB_TOKEN}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME} HEAD:main
           '''
         }
       }
