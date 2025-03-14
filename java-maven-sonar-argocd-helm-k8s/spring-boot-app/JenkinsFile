@@ -1,46 +1,44 @@
 pipeline {
     agent {
         docker {
-            image 'abhishekf5/maven-abhishek-docker-agent:v1'
+            image 'mikefarah/yq:latest' // Image with yq preinstalled
             args '--privileged -u root -v /var/run/docker.sock:/var/run/docker.sock'
         }
     }
-    
+
     environment {
         DOCKER_IMAGE = "sagarmagar0709/ultimate-cicd:${BUILD_NUMBER}"
         GIT_REPO_NAME = "Jenkins-Zero-To-Hero"
         GIT_USER_NAME = "sagarmagar0709"
     }
-    
+
     stages {
         stage('Checkout') {
             steps {
-                sh 'echo passed'
+                sh 'echo "Checkout stage passed"'
             }
         }
-        
+
         stage('Build and Test') {
             steps {
                 sh 'ls -ltr'
                 sh 'cd java-maven-sonar-argocd-helm-k8s/spring-boot-app && mvn clean package'
             }
         }
-        
+
         stage('Build and Push Docker Image') {
             steps {
                 withCredentials([usernamePassword(credentialsId: 'docker-cred', usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
-                    script {
-                        sh '''
+                    sh '''
                         cd java-maven-sonar-argocd-helm-k8s/spring-boot-app 
                         docker build -t ${DOCKER_IMAGE} .
                         docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD
                         docker push ${DOCKER_IMAGE}
-                        '''
-                    }
+                    '''
                 }
             }
         }
-        
+
         stage('Update Deployment File') {
             steps {
                 withCredentials([string(credentialsId: 'github', variable: 'GITHUB_TOKEN')]) {
@@ -49,13 +47,7 @@ pipeline {
                         git config --global user.name "sagarmagar0709"
                         git remote set-url origin https://${GITHUB_TOKEN}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME}.git
                         
-                        # Check if yq is installed
-                        if ! command -v yq &> /dev/null; then
-                          echo "yq not found! Installing..."
-                          sudo apt update && sudo apt install -y yq
-                        fi
-                        
-                        # Update the deployment file
+                        # Update image in deployment YAML
                         yq eval '.spec.template.spec.containers[0].image = "${DOCKER_IMAGE}"' -i java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml
                         
                         git add java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml
